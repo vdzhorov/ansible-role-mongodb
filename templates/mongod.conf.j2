@@ -27,5 +27,10 @@ security:
 {% else %}
   authorization: disabled
 {% endif %}
+{% if mongodb_keyfile_path %}
   keyFile: {{ mongodb_keyfile_path }}
+{% endif %}
 
+{% if mongodb_extra_options %}
+{{ mongodb_extra_options | to_nice_yaml(indent=2) }}
+{% endif %}
