@@ -1,0 +1,45 @@
+{{ ansible_manged | default('# This file is managed by Ansible') }}
+systemLog:
+  destination: file
+  path: {{ mongodb_logpath }}
+  logAppend: true
+  verbosity: 0
+
+storage:
+  dbPath: {{ mongodb_dbpath }}
+  journal:
+    enabled: {{ mongodb_journal_enabled | bool | lower }}
+  wiredTiger:
+    engineConfig:
+      directoryForIndexes: true
+    collectionConfig:
+      blockCompressor: zstd
+
+processManagement:
+  fork: false
+
+net:
+  port: {{ mongodb_port }}
+  bindIp: {{ mongodb_bind_ip }}
+{% if mongodb_tls_enabled %}
+  tls:
+    mode: {{ mongodb_tls_mode }}
+    certificateKeyFile: {{ mongodb_tls_cert_file }}
+    CAFile: {{ mongodb_tls_ca_file }}
+{% endif %}
+
+security:
+{% if mongodb_enable_auth %}
+  authorization: enabled
+  keyFile: {{ mongodb_keyfile_path }}
+{% else %}
+  authorization: disabled
+{% endif %}
+
+{% if mongodb_replset_enabled %}
+replication:
+  replSetName: {{ mongodb_replset_name }}
+{% endif %}
+
+setParameter:
+  enableLocalhostAuthBypass: false

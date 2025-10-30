@@ -1,0 +1,4 @@
+mongod soft nofile {{ mongodb_nofile_limit }}
+mongod hard nofile {{ mongodb_nofile_limit }}
+mongod soft nproc  {{ mongodb_nproc_limit }}
+mongod hard nproc  {{ mongodb_nproc_limit }}
