@@ -1,10 +1,23 @@
 ---
 
+# Apply any pending mongod restarts triggered by templating /etc/mongod.conf
+- name: Flush handlers (ensure mongod was restarted if config changed)
+  ansible.builtin.meta: flush_handlers
+
+# Make sure mongod is up (configure.yml already enables+starts, but be explicit)
+- name: Ensure mongod service is running
+  ansible.builtin.service:
+    name: "{{ mongodb_service_name }}"
+    state: started
+    enabled: true
+
 - name: Wait for mongod TCP to be reachable
   ansible.builtin.wait_for:
     host: "{{ mongodb_bind_ip | default('127.0.0.1') }}"
     port: "{{ mongodb_port }}"
     timeout: 60
+  delegate_to: "{{ inventory_hostname }}"
+  become: true
 
 # Initiate the replica set on the primary (idempotent)
 - name: Initiate replica set on primary
