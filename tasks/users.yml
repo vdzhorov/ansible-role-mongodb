@@ -1,7 +1,8 @@
 ---
 
-# Bootstrap admin user if missing, then upsert application users.
-# No replication involved.
+# Single-node role (no replication):
+# - Bootstraps the admin user safely (even if auth is enabled)
+# - Then (idempotently) creates/updates application users
 
 - name: "Flush handlers to apply latest config"
   ansible.builtin.meta: flush_handlers
@@ -30,13 +31,15 @@
   ansible.builtin.set_fact:
     _mongosh_host: "{{ ansible_fqdn | default(inventory_hostname) | default(ansible_default_ipv4.address) }}"
 
-# Check if admin exists (try auth, then no-auth)
+# --- Detect whether admin exists (try auth to host, then no-auth to localhost) ---
+
 - name: "Check admin exists (auth attempt)"
   ansible.builtin.shell: >
     mongosh --quiet --host "{{ _mongosh_host }}"
     -u "{{ mongodb_admin_user }}" -p "{{ mongodb_admin_pwd }}" --authenticationDatabase admin
     --eval 'db.getSiblingDB("admin").system.users.countDocuments({user:"{{ mongodb_admin_user }}", db:"admin"})'
-  args: { executable: /bin/bash }
+  args:
+    executable: /bin/bash
   register: _admin_auth_count
   changed_when: false
   failed_when: false
@@ -45,7 +48,8 @@
   ansible.builtin.shell: >
     mongosh --quiet --host 127.0.0.1
     --eval 'db.getSiblingDB("admin").system.users.countDocuments({user:"{{ mongodb_admin_user }}", db:"admin"})'
-  args: { executable: /bin/bash }
+  args:
+    executable: /bin/bash
   register: _admin_noauth_count
   changed_when: false
   failed_when: false
@@ -58,22 +62,52 @@
         (_admin_noauth_count.stdout | default('0') | trim | int) > 0
       }}
 
-# If admin missing AND auth-enabled config prevents create, temporarily run standalone no-auth to create admin
+# --- If admin missing, do a temporary standalone bootstrap on localhost (no auth) ---
+
 - name: "Stop mongod for standalone bootstrap (only if admin missing)"
   when: not _admin_exists
   ansible.builtin.service:
     name: "{{ mongodb_service_name }}"
     state: stopped
 
-- name: "Start temporary standalone mongod (localhost, no auth)"
+- name: "Create runtime dir for bootstrap pidfile"
+  when: not _admin_exists
+  ansible.builtin.file:
+    path: /run/mongodb
+    state: directory
+    owner: mongodb
+    group: mongodb
+    mode: "0755"
+
+- name: "Fix ownership on db and log dirs"
+  when: not _admin_exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: mongodb
+    group: mongodb
+    mode: "0750"
+  loop:
+    - "{{ mongodb_dbpath }}"
+
+- name: "Fix ownership on log dir"
+  when: not _admin_exists
+  ansible.builtin.file:
+    path: "{{ mongodb_logpath | dirname }}"
+    state: directory
+    owner: mongodb
+    group: mongodb
+    mode: "0755"
+
+- name: "Start temporary standalone mongod (localhost, no auth, as mongodb)"
   when: not _admin_exists
   ansible.builtin.shell: >
-    /usr/bin/mongod
+    runuser -u mongodb -- /usr/bin/mongod
     --port {{ mongodb_port }}
     --bind_ip 127.0.0.1
     --dbpath {{ mongodb_dbpath }}
-    --logpath /var/log/mongodb/bootstrap.log
-    --pidfilepath /run/mongod-bootstrap.pid
+    --logpath {{ mongodb_logpath | dirname }}/bootstrap.log
+    --pidfilepath /run/mongodb/mongod-bootstrap.pid
     --fork
   args:
     executable: /bin/bash
@@ -108,22 +142,75 @@
   register: admin_create
   changed_when: admin_create.stdout is search('admin_created')
 
-- name: "Shutdown temporary standalone"
+# --- Robust shutdown of the temporary standalone and wait for port to close ---
+
+- name: "Shutdown temporary standalone mongod (best-effort)"
   when: not _admin_exists
   ansible.builtin.shell: |
+    set -e
+    # Try clean shutdown first (no-auth standalone should accept this)
     mongosh --quiet --host 127.0.0.1 --eval 'db.getSiblingDB("admin").shutdownServer({timeoutSecs: 10})' || true
   args:
     executable: /bin/bash
 
-- name: "Wait for standalone to stop"
+- name: "Read bootstrap PID file if present"
+  when: not _admin_exists
+  ansible.builtin.stat:
+    path: /run/mongodb/mongod-bootstrap.pid
+  register: _bootstrap_pidfile
+
+- name: "Kill bootstrap mongod with TERM (fallback)"
+  when: not _admin_exists and _bootstrap_pidfile.stat.exists
+  ansible.builtin.shell: |
+    pid="$(cat /run/mongodb/mongod-bootstrap.pid 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill -TERM "$pid" || true
+    fi
+  args:
+    executable: /bin/bash
+
+- name: "Wait for bootstrap mongod process to exit (after TERM)"
+  when: not _admin_exists
+  ansible.builtin.shell: |
+    pidfile=/run/mongodb/mongod-bootstrap.pid
+    if [ -f "$pidfile" ]; then
+      pid="$(cat "$pidfile" 2>/dev/null || true)"
+      if [ -n "$pid" ]; then
+        for i in $(seq 1 20); do
+          kill -0 "$pid" 2>/dev/null || exit 0
+          sleep 1
+        done
+        exit 1
+      fi
+    fi
+    exit 0
+  args:
+    executable: /bin/bash
+  register: _wait_term
+  changed_when: false
+  failed_when: false
+
+- name: "Kill bootstrap mongod with KILL (last resort)"
+  when: not _admin_exists and (_wait_term.rc | default(0)) != 0
+  ansible.builtin.shell: |
+    pid="$(cat /run/mongodb/mongod-bootstrap.pid 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" || true
+    fi
+  args:
+    executable: /bin/bash
+
+- name: "Wait for port to be closed"
   when: not _admin_exists
   ansible.builtin.wait_for:
     host: 127.0.0.1
     port: "{{ mongodb_port }}"
-    state: drained
-    timeout: 60
+    state: stopped
+    timeout: 90
   delegate_to: "{{ inventory_hostname }}"
   become: true
+
+# --- Bring back the normal service (with auth per your template) ---
 
 - name: "Start normal mongod service (with auth per template)"
   when: not _admin_exists
@@ -141,7 +228,8 @@
   delegate_to: "{{ inventory_hostname }}"
   become: true
 
-# Upsert application users
+# --- Upsert application users (idempotent) ---
+
 - name: "Build mongosh auth args"
   ansible.builtin.set_fact:
     _mongosh_auth: >-
