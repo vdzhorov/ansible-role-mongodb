@@ -7,13 +7,6 @@ systemLog:
 
 storage:
   dbPath: {{ mongodb_dbpath }}
-  journal:
-    enabled: {{ mongodb_journal_enabled | bool | lower }}
-  wiredTiger:
-    engineConfig:
-      directoryForIndexes: true
-    collectionConfig:
-      blockCompressor: zstd
 
 processManagement:
   fork: false

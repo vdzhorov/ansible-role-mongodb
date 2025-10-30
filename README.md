@@ -56,7 +56,6 @@ mongodb_bind_ip: "0.0.0.0"
 mongodb_port: 27017
 mongodb_dbpath: "/var/lib/mongodb"
 mongodb_logpath: "/var/log/mongodb/mongod.log"
-mongodb_journal_enabled: true
 
 # Auth
 mongodb_enable_auth: true

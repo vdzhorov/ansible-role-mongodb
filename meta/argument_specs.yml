@@ -26,9 +26,6 @@ argument_specs:
       mongodb_logpath:
         type: str
         default: "/var/log/mongodb/mongod.log"
-      mongodb_journal_enabled:
-        type: bool
-        default: true
       mongodb_enable_auth:
         type: bool
         default: true
