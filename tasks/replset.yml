@@ -2,7 +2,7 @@
 
 - name: Wait for mongod TCP to be reachable
   ansible.builtin.wait_for:
-    host: 127.0.0.1
+    host: "{{ mongodb_bind_ip | default('127.0.0.1') }}"
     port: "{{ mongodb_port }}"
     timeout: 60
 
