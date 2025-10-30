@@ -1,13 +1,34 @@
 ---
 
-- name: Download MongoDB repo key (8.0)
+- name: Fetch MongoDB 8.0 repository key (ASCII armored)
   ansible.builtin.get_url:
-    url: "{{ mongodb_repo_key_url }}"
-    dest: "{{ mongodb_repo_keyring_path }}"
+    url: "{{ mongodb_repo_key_url }}"             # https://pgp.mongodb.com/server-8.0.asc
+    dest: "/usr/share/keyrings/mongodb-server-8.0.asc"
     mode: '0644'
+
+- name: Convert MongoDB key to dearmored .gpg keyring
+  ansible.builtin.command:
+    cmd: >
+      gpg --dearmor
+      --output /usr/share/keyrings/mongodb-server-8.0.gpg
+      /usr/share/keyrings/mongodb-server-8.0.asc
+  args:
+    creates: "/usr/share/keyrings/mongodb-server-8.0.gpg"
+
+- name: Ensure permissions on keyring
+  ansible.builtin.file:
+    path: "/usr/share/keyrings/mongodb-server-8.0.gpg"
+    mode: '0644'
+    owner: root
+    group: root
 
 - name: Add MongoDB APT repository (Ubuntu 24.04 Noble)
   ansible.builtin.apt_repository:
-    repo: "{{ mongodb_repo_line }}"
+    repo: "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/{{ mongodb_repo_series }} multiverse"
     filename: "mongodb-org-{{ mongodb_repo_series }}"
     state: present
+
+- name: Update APT cache (force refresh)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
