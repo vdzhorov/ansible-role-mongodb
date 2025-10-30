@@ -1,0 +1,98 @@
+---
+
+argument_specs:
+  main:
+    short_description: Install and configure MongoDB 8.0.15 on Ubuntu 24.04
+    options:
+      mongodb_version:
+        type: str
+        default: "8.0.15"
+        description: Version pin for MongoDB packages.
+      mongodb_repo_series:
+        type: str
+        default: "8.0"
+      mongodb_service_name:
+        type: str
+        default: mongod
+      mongodb_bind_ip:
+        type: str
+        default: "0.0.0.0"
+      mongodb_port:
+        type: int
+        default: 27017
+      mongodb_dbpath:
+        type: str
+        default: "/var/lib/mongodb"
+      mongodb_logpath:
+        type: str
+        default: "/var/log/mongodb/mongod.log"
+      mongodb_journal_enabled:
+        type: bool
+        default: true
+      mongodb_enable_auth:
+        type: bool
+        default: true
+      mongodb_keyfile_path:
+        type: str
+        default: "/etc/mongod-keyfile"
+      mongodb_keyfile_content:
+        type: str
+        required: false
+        description: Keyfile content. Provide the same value across all members.
+      mongodb_replset_enabled:
+        type: bool
+        default: true
+      mongodb_replset_name:
+        type: str
+        default: rs0
+      mongodb_replset_members:
+        type: list
+        elements: str
+        default: []
+      mongodb_node_role:
+        type: str
+        choices: [ primary, secondary, arbiter ]
+        default: primary
+      mongodb_admin_user:
+        type: str
+        default: admin
+      mongodb_admin_pwd:
+        type: str
+        required: true
+      mongodb_users:
+        type: list
+        elements: dict
+        default: []
+        options:
+          name: { type: str, required: true }
+          pwd:  { type: str, required: true }
+          db:   { type: str, required: true }
+          roles:
+            type: list
+            elements: dict
+            required: true
+      mongodb_nofile_limit:
+        type: int
+        default: 64000
+      mongodb_nproc_limit:
+        type: int
+        default: 32000
+      mongodb_swappiness:
+        type: int
+        default: 1
+      mongodb_disable_thp:
+        type: bool
+        default: true
+      mongodb_tls_enabled:
+        type: bool
+        default: false
+      mongodb_tls_mode:
+        type: str
+        choices: [ disabled, preferTLS, requireTLS ]
+        default: requireTLS
+      mongodb_tls_cert_file:
+        type: str
+        default: "/etc/ssl/mongodb/server.pem"
+      mongodb_tls_ca_file:
+        type: str
+        default: "/etc/ssl/mongodb/ca.pem"

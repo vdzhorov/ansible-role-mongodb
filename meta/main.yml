@@ -1,0 +1,20 @@
+---
+
+galaxy_info:
+  role_name: mongodb_ubuntu24
+  author: Valentin Dzhorov
+  description: Install & configure MongoDB 8.0.15 on Ubuntu 24.04 with authentication, user management, replication, and OS tuning.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions: [ noble ]
+  galaxy_tags:
+    - mongodb
+    - database
+    - ubuntu
+    - replication
+    - security
+    - ops
+
+dependencies: []
