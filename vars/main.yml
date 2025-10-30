@@ -1,0 +1,15 @@
+---
+# Official MongoDB 8.0 repo and key for Ubuntu 24.04 (noble)
+mongodb_repo_key_url: "https://pgp.mongodb.com/server-8.0.asc"
+mongodb_repo_keyring_path: "/usr/share/keyrings/mongodb-server-8.0.gpg"
+mongodb_repo_line: "deb [ arch=amd64,arm64 signed-by={{ mongodb_repo_keyring_path }} ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/{{ mongodb_repo_series }} multiverse"
+
+# Version-pinned packages
+mongodb_pkg_version: "={{ mongodb_version }}"
+mongodb_packages:
+  - "mongodb-org{{ mongodb_pkg_version }}"
+  - "mongodb-org-database{{ mongodb_pkg_version }}"
+  - "mongodb-org-server{{ mongodb_pkg_version }}"
+  - "mongodb-org-mongos{{ mongodb_pkg_version }}"
+  - "mongodb-org-tools{{ mongodb_pkg_version }}"
+  - "mongodb-mongosh"
