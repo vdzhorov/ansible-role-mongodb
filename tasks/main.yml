@@ -1,0 +1,24 @@
+---
+
+- name: Install prerequisites
+  ansible.builtin.import_tasks: prereq.yml
+
+- name: Configure MongoDB APT repo
+  ansible.builtin.import_tasks: repo.yml
+
+- name: Install MongoDB packages (version pinned)
+  ansible.builtin.import_tasks: install.yml
+
+- name: OS tuning (limits, THP, swappiness)
+  ansible.builtin.import_tasks: tuning.yml
+
+- name: Configure mongod (conf, keyfile, dirs)
+  ansible.builtin.import_tasks: configure.yml
+
+- name: Configure replica set (init/add)
+  when: mongodb_replset_enabled
+  ansible.builtin.import_tasks: replset.yml
+
+- name: Create/ensure users
+  when: mongodb_enable_auth
+  ansible.builtin.import_tasks: users.yml

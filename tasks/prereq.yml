@@ -1,0 +1,11 @@
+---
+
+- name: Ensure base packages
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - ca-certificates
+      - lsb-release
+      - curl
+    state: present
+    update_cache: true

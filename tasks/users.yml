@@ -1,0 +1,42 @@
+---
+
+# Ensure admin user exists without requiring prior auth
+- name: Ensure admin user exists (idempotent)
+  ansible.builtin.shell: |
+    mongosh --quiet --eval '
+      const admin = db.getSiblingDB("admin");
+      const u = admin.system.users.findOne({user:"{{ mongodb_admin_user }}"});
+      if (!u) {
+        admin.createUser({
+          user: "{{ mongodb_admin_user }}",
+          pwd: "{{ mongodb_admin_pwd }}",
+          roles: [ { role: "root", db: "admin" } ]
+        });
+        print("admin_created");
+      } else { print("admin_exists"); }
+    '
+  args: { warn: false }
+  register: admin_create
+  changed_when: admin_create.stdout is search('admin_created')
+
+# Ensure application users (create or update)
+- name: Ensure application users (create/update)
+  ansible.builtin.shell: |
+    mongosh --quiet -u "{{ mongodb_admin_user }}" -p "{{ mongodb_admin_pwd }}" --authenticationDatabase admin --eval '
+      const spec = {{ item | to_json }};
+      const dbh = db.getSiblingDB(spec.db);
+      const exists = db.getSiblingDB("admin").system.users.findOne({ user: spec.name, db: spec.db });
+      if (!exists) {
+        dbh.createUser({ user: spec.name, pwd: spec.pwd, roles: spec.roles });
+        print("created:" + spec.name);
+      } else {
+        try { dbh.updateUser(spec.name, { roles: spec.roles, pwd: spec.pwd }); print("updated:" + spec.name); }
+        catch(e) { print("noop:" + spec.name + " " + e); }
+      }
+    '
+  args: { warn: false }
+  loop: "{{ mongodb_users }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.db }}"
+  register: user_results
+  changed_when: user_results.stdout is search('created:|updated:')

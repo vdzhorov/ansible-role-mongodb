@@ -1,0 +1,34 @@
+---
+
+- name: Ensure data and log directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: mongodb
+    group: mongodb
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: "{{ mongodb_dbpath }}", mode: '0750' }
+    - { path: "{{ mongodb_logpath | dirname }}" }
+
+- name: Place keyfile (for internal auth)
+  when: mongodb_enable_auth
+  ansible.builtin.template:
+    src: keyfile.j2
+    dest: "{{ mongodb_keyfile_path }}"
+    owner: mongodb
+    group: mongodb
+    mode: '0600'
+
+- name: Render mongod.conf
+  ansible.builtin.template:
+    src: mongod.conf.j2
+    dest: /etc/mongod.conf
+    mode: '0644'
+  notify: restart mongod
+
+- name: Enable mongod
+  ansible.builtin.service:
+    name: "{{ mongodb_service_name }}"
+    enabled: true
+    state: started

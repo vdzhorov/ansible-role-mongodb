@@ -1,0 +1,14 @@
+---
+
+- name: Install MongoDB packages (pinned)
+  ansible.builtin.apt:
+    name: "{{ mongodb_packages }}"
+    state: present
+    update_cache: true
+
+- name: Hold MongoDB packages at requested version
+  ansible.builtin.dpkg_selections:
+    name: "{{ item | regex_replace('=.*', '') }}"
+    selection: hold
+  loop: "{{ mongodb_packages }}"
+  when: item is search('=')

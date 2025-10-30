@@ -1,0 +1,13 @@
+---
+
+- name: Download MongoDB repo key (8.0)
+  ansible.builtin.get_url:
+    url: "{{ mongodb_repo_key_url }}"
+    dest: "{{ mongodb_repo_keyring_path }}"
+    mode: '0644'
+
+- name: Add MongoDB APT repository (Ubuntu 24.04 Noble)
+  ansible.builtin.apt_repository:
+    repo: "{{ mongodb_repo_line }}"
+    filename: "mongodb-org-{{ mongodb_repo_series }}"
+    state: present

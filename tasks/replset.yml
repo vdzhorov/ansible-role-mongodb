@@ -1,0 +1,56 @@
+---
+
+- name: Wait for mongod TCP to be reachable
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ mongodb_port }}"
+    timeout: 60
+
+# Initiate the replica set on the primary (idempotent)
+- name: Initiate replica set on primary
+  when: mongodb_node_role == 'primary'
+  ansible.builtin.shell: |
+    mongosh --quiet --eval '
+      try {
+        const s = rs.status();
+        if (s.ok === 1) { print("rs already initiated"); quit(0); }
+      } catch (e) { /* not initiated */ }
+      rs.initiate({
+        _id: "{{ mongodb_replset_name }}",
+        members: [
+          {% for h in mongodb_replset_members %}{ _id: {{ loop.index0 }}, host: "{{ h }}" }{{ "," if not loop.last }}{% endfor %}
+        ]
+      });
+      print("rs initiated");
+    '
+  args: { warn: false }
+  changed_when: "'rs initiated' in stdout"
+
+# Add this node on non-primary members (noop if already present)
+- name: Add this node if secondary/arbiter (idempotent)
+  when: mongodb_node_role != 'primary'
+  ansible.builtin.shell: |
+    mongosh --quiet --eval '
+      const me = "{{ ansible_fqdn | default(inventory_hostname) }}:{{ mongodb_port }}";
+      try {
+        const cfg = rs.conf();
+        if (!cfg.members.some(m => m.host === me)) { rs.add(me); print("added " + me); }
+        else { print("exists " + me); }
+      } catch(e) { print(e); }
+    '
+  args: { warn: false }
+  register: rs_add
+  changed_when: rs_add.stdout is search('added')
+
+- name: Wait for PRIMARY on primary nodes
+  when: mongodb_node_role == 'primary'
+  ansible.builtin.shell: |
+    mongosh --quiet --eval '
+      for (let i=0; i<60; i++) {
+        try { const s = rs.status(); if (s.myState === 1) { print("PRIMARY"); quit(0); } } catch(e) {}
+        sleep(1000);
+      }
+      quit(1);
+    '
+  register: rs_primary
+  changed_when: false

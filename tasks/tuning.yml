@@ -1,0 +1,29 @@
+---
+
+- name: Configure nofile/nproc limits for mongod
+  ansible.builtin.template:
+    src: limits-mongod.conf.j2
+    dest: /etc/security/limits.d/mongod.conf
+    mode: '0644'
+
+- name: Set vm.swappiness
+  ansible.posix.sysctl:
+    name: vm.swappiness
+    value: "{{ mongodb_swappiness }}"
+    state: present
+    reload: true
+
+- name: Disable Transparent Huge Pages (service)
+  when: mongodb_disable_thp
+  ansible.builtin.template:
+    src: disable-thp.service.j2
+    dest: /etc/systemd/system/disable-thp.service
+    mode: '0644'
+
+- name: Enable & start THP disable service
+  when: mongodb_disable_thp
+  ansible.builtin.systemd:
+    name: disable-thp
+    daemon_reload: true
+    enabled: true
+    state: started
