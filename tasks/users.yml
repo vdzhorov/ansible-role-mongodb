@@ -1,42 +1,177 @@
 ---
 
-# Ensure admin user exists without requiring prior auth
-- name: Ensure admin user exists (idempotent)
+# Bootstrap admin user if missing, then upsert application users.
+# No replication involved.
+
+- name: "Flush handlers to apply latest config"
+  ansible.builtin.meta: flush_handlers
+
+- name: "Ensure mongod is running"
+  ansible.builtin.service:
+    name: "{{ mongodb_service_name }}"
+    state: started
+    enabled: true
+
+- name: "Compute local wait host"
+  ansible.builtin.set_fact:
+    _local_wait_host: >-
+      {{ '127.0.0.1' if (mongodb_bind_ip | string) is search('127.0.0.1') else
+         (ansible_default_ipv4.address | default('127.0.0.1')) }}
+
+- name: "Wait for mongod locally"
+  ansible.builtin.wait_for:
+    host: "{{ _local_wait_host }}"
+    port: "{{ mongodb_port }}"
+    timeout: 120
+  delegate_to: "{{ inventory_hostname }}"
+  become: true
+
+- name: "Decide mongosh host"
+  ansible.builtin.set_fact:
+    _mongosh_host: "{{ ansible_fqdn | default(inventory_hostname) | default(ansible_default_ipv4.address) }}"
+
+# Check if admin exists (try auth, then no-auth)
+- name: "Check admin exists (auth attempt)"
+  ansible.builtin.shell: >
+    mongosh --quiet --host "{{ _mongosh_host }}"
+    -u "{{ mongodb_admin_user }}" -p "{{ mongodb_admin_pwd }}" --authenticationDatabase admin
+    --eval 'db.getSiblingDB("admin").system.users.countDocuments({user:"{{ mongodb_admin_user }}", db:"admin"})'
+  args: { executable: /bin/bash }
+  register: _admin_auth_count
+  changed_when: false
+  failed_when: false
+
+- name: "Check admin exists (no-auth to localhost)"
+  ansible.builtin.shell: >
+    mongosh --quiet --host 127.0.0.1
+    --eval 'db.getSiblingDB("admin").system.users.countDocuments({user:"{{ mongodb_admin_user }}", db:"admin"})'
+  args: { executable: /bin/bash }
+  register: _admin_noauth_count
+  changed_when: false
+  failed_when: false
+
+- name: "Set admin existence fact"
+  ansible.builtin.set_fact:
+    _admin_exists: >-
+      {{
+        (_admin_auth_count.stdout | default('0') | trim | int) > 0 or
+        (_admin_noauth_count.stdout | default('0') | trim | int) > 0
+      }}
+
+# If admin missing AND auth-enabled config prevents create, temporarily run standalone no-auth to create admin
+- name: "Stop mongod for standalone bootstrap (only if admin missing)"
+  when: not _admin_exists
+  ansible.builtin.service:
+    name: "{{ mongodb_service_name }}"
+    state: stopped
+
+- name: "Start temporary standalone mongod (localhost, no auth)"
+  when: not _admin_exists
+  ansible.builtin.shell: >
+    /usr/bin/mongod
+    --port {{ mongodb_port }}
+    --bind_ip 127.0.0.1
+    --dbpath {{ mongodb_dbpath }}
+    --logpath /var/log/mongodb/bootstrap.log
+    --pidfilepath /run/mongod-bootstrap.pid
+    --fork
+  args:
+    executable: /bin/bash
+
+- name: "Wait for temporary standalone"
+  when: not _admin_exists
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ mongodb_port }}"
+    timeout: 120
+  delegate_to: "{{ inventory_hostname }}"
+  become: true
+
+- name: "Create admin user on standalone"
+  when: not _admin_exists
   ansible.builtin.shell: |
-    mongosh --quiet --eval '
-      const admin = db.getSiblingDB("admin");
-      const u = admin.system.users.findOne({user:"{{ mongodb_admin_user }}"});
-      if (!u) {
-        admin.createUser({
-          user: "{{ mongodb_admin_user }}",
-          pwd: "{{ mongodb_admin_pwd }}",
-          roles: [ { role: "root", db: "admin" } ]
-        });
-        print("admin_created");
-      } else { print("admin_exists"); }
-    '
-  args: { warn: false }
+    mongosh --quiet --host 127.0.0.1 <<'JS'
+    const admin = db.getSiblingDB("admin");
+    if (!admin.system.users.findOne({user:"{{ mongodb_admin_user }}" })) {
+      admin.createUser({
+        user: "{{ mongodb_admin_user }}",
+        pwd:  "{{ mongodb_admin_pwd }}",
+        roles: [ { role: "root", db: "admin" } ]
+      });
+      print("admin_created");
+    } else {
+      print("admin_exists");
+    }
+    JS
+  args:
+    executable: /bin/bash
   register: admin_create
   changed_when: admin_create.stdout is search('admin_created')
 
-# Ensure application users (create or update)
-- name: Ensure application users (create/update)
+- name: "Shutdown temporary standalone"
+  when: not _admin_exists
   ansible.builtin.shell: |
-    mongosh --quiet -u "{{ mongodb_admin_user }}" -p "{{ mongodb_admin_pwd }}" --authenticationDatabase admin --eval '
-      const spec = {{ item | to_json }};
-      const dbh = db.getSiblingDB(spec.db);
-      const exists = db.getSiblingDB("admin").system.users.findOne({ user: spec.name, db: spec.db });
+    mongosh --quiet --host 127.0.0.1 --eval 'db.getSiblingDB("admin").shutdownServer({timeoutSecs: 10})' || true
+  args:
+    executable: /bin/bash
+
+- name: "Wait for standalone to stop"
+  when: not _admin_exists
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ mongodb_port }}"
+    state: drained
+    timeout: 60
+  delegate_to: "{{ inventory_hostname }}"
+  become: true
+
+- name: "Start normal mongod service (with auth per template)"
+  when: not _admin_exists
+  ansible.builtin.service:
+    name: "{{ mongodb_service_name }}"
+    state: started
+    enabled: true
+
+- name: "Wait for mongod locally (auth on)"
+  when: not _admin_exists
+  ansible.builtin.wait_for:
+    host: "{{ _local_wait_host }}"
+    port: "{{ mongodb_port }}"
+    timeout: 120
+  delegate_to: "{{ inventory_hostname }}"
+  become: true
+
+# Upsert application users
+- name: "Build mongosh auth args"
+  ansible.builtin.set_fact:
+    _mongosh_auth: >-
+      {{ '-u ' ~ mongodb_admin_user ~ ' -p ' ~ mongodb_admin_pwd ~ ' --authenticationDatabase admin'
+         if mongodb_enable_auth else '' }}
+
+- name: "Ensure application users (create/update)"
+  when: (mongodb_users | default([])) | length > 0
+  ansible.builtin.shell: |
+    mongosh --quiet --host "{{ _mongosh_host }}" {{ _mongosh_auth }} <<'JS'
+    const specs = {{ mongodb_users | to_json }};
+    function upsertUser(s) {
+      const adminDb = db.getSiblingDB("admin");
+      const dbh = db.getSiblingDB(s.db);
+      const exists = adminDb.system.users.findOne({ user: s.name, db: s.db });
       if (!exists) {
-        dbh.createUser({ user: spec.name, pwd: spec.pwd, roles: spec.roles });
-        print("created:" + spec.name);
+        dbh.createUser({ user: s.name, pwd: s.pwd, roles: s.roles });
+        print("created:"+s.name+"@"+s.db);
       } else {
-        try { dbh.updateUser(spec.name, { roles: spec.roles, pwd: spec.pwd }); print("updated:" + spec.name); }
-        catch(e) { print("noop:" + spec.name + " " + e); }
+        try {
+          dbh.updateUser(s.name, { roles: s.roles, pwd: s.pwd });
+          print("updated:"+s.name+"@"+s.db);
+        } catch(e) {
+          print("noop:"+s.name+"@"+s.db+" "+e);
+        }
       }
-    '
-  args: { warn: false }
-  loop: "{{ mongodb_users }}"
-  loop_control:
-    label: "{{ item.name }}@{{ item.db }}"
-  register: user_results
-  changed_when: user_results.stdout is search('created:|updated:')
+    }
+    specs.forEach(upsertUser);
+    JS
+  args:
+    executable: /bin/bash
+  register: users_upsert
+  changed_when: users_upsert.stdout is search('created:|updated:')

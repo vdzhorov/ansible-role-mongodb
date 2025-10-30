@@ -2,7 +2,7 @@
 
 argument_specs:
   main:
-    short_description: Install and configure MongoDB 8.0.15 on Ubuntu 24.04
+    short_description: Install and configure MongoDB 8.0.15 on Ubuntu 24.04 (no replication)
     options:
       mongodb_version:
         type: str
@@ -16,7 +16,7 @@ argument_specs:
         default: mongod
       mongodb_bind_ip:
         type: str
-        default: "0.0.0.0"
+        default: "127.0.0.1,0.0.0.0"
       mongodb_port:
         type: int
         default: 27017
@@ -29,27 +29,6 @@ argument_specs:
       mongodb_enable_auth:
         type: bool
         default: true
-      mongodb_keyfile_path:
-        type: str
-        default: "/etc/mongod-keyfile"
-      mongodb_keyfile_content:
-        type: str
-        required: false
-        description: Keyfile content. Provide the same value across all members.
-      mongodb_replset_enabled:
-        type: bool
-        default: true
-      mongodb_replset_name:
-        type: str
-        default: rs0
-      mongodb_replset_members:
-        type: list
-        elements: str
-        default: []
-      mongodb_node_role:
-        type: str
-        choices: [ primary, secondary, arbiter ]
-        default: primary
       mongodb_admin_user:
         type: str
         default: admin

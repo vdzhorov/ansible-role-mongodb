@@ -12,13 +12,8 @@
 - name: OS tuning (limits, THP, swappiness)
   ansible.builtin.import_tasks: tuning.yml
 
-- name: Configure mongod (conf, keyfile, dirs)
+- name: Configure mongod (conf, dirs)
   ansible.builtin.import_tasks: configure.yml
 
-- name: Configure replica set (init/add)
-  when: mongodb_replset_enabled
-  ansible.builtin.import_tasks: replset.yml
-
-- name: Create/ensure users
-  when: mongodb_enable_auth
+- name: Create/ensure users (admin + app)
   ansible.builtin.import_tasks: users.yml

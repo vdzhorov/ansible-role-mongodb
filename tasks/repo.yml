@@ -1,73 +1,35 @@
 ---
 
-# Ensure prereqs
-- name: Ensure HTTPS + crypto prereqs
-  apt:
-    name:
-      - ca-certificates
-      - gnupg
-      - curl
-    state: present
-    update_cache: true
-
-# Clean any old/wrong MongoDB key/repo files (safe if absent)
-- name: Remove legacy MongoDB keyrings/lists (optional but helpful)
-  file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /etc/apt/trusted.gpg.d/mongodb.gpg
-    - /usr/share/keyrings/mongodb.gpg
-    - /usr/share/keyrings/mongodb-server-8.0.gpg   # will recreate below
-    - /usr/share/keyrings/mongodb-server-8.0.asc
-    - /etc/apt/sources.list.d/mongodb-org-8.0.list
-
-# Fetch the ASCII armored key for 8.0
-- name: Download MongoDB 8.0 repo key (ASCII)
-  get_url:
-    url: "https://pgp.mongodb.com/server-8.0.asc"
+- name: Fetch MongoDB 8.0 repository key (ASCII armored)
+  ansible.builtin.get_url:
+    url: "{{ mongodb_repo_key_url }}"
     dest: "/usr/share/keyrings/mongodb-server-8.0.asc"
     mode: '0644'
 
-# Dearmor to the binary keyring APT expects
-- name: Convert MongoDB key to binary .gpg keyring
-  command: >
-    gpg --dearmor
-    --output /usr/share/keyrings/mongodb-server-8.0.gpg
-    /usr/share/keyrings/mongodb-server-8.0.asc
+- name: Convert MongoDB key to dearmored .gpg keyring
+  ansible.builtin.command:
+    cmd: >
+      gpg --dearmor
+      --output {{ mongodb_repo_keyring_path }}
+      /usr/share/keyrings/mongodb-server-8.0.asc
   args:
-    creates: "/usr/share/keyrings/mongodb-server-8.0.gpg"
+    creates: "{{ mongodb_repo_keyring_path }}"
 
-- name: Fix permissions on keyring
-  file:
-    path: /usr/share/keyrings/mongodb-server-8.0.gpg
+- name: Ensure permissions on keyring
+  ansible.builtin.file:
+    path: "{{ mongodb_repo_keyring_path }}"
+    mode: '0644'
     owner: root
     group: root
-    mode: '0644'
 
-# (Important) Verify the key actually contains the expected keyid
-- name: Show key info (for assert)
-  command: gpg --show-keys --with-colons /usr/share/keyrings/mongodb-server-8.0.gpg
-  register: mongo_keyinfo
-  changed_when: false
-
-- name: Assert expected MongoDB key id is present
-  assert:
-    that:
-      - "'41DE058A4E7DCA05' in mongo_keyinfo.stdout"
-    fail_msg: >
-      MongoDB keyring does not contain keyid 41DE058A4E7DCA05.
-      The downloaded key may be wrong/corrupted or blocked by a proxy.
-
-# Add the repo line pointing to the *binary* keyring
-- name: Add MongoDB APT repository (Ubuntu 24.04 Noble, 8.0 series)
-  apt_repository:
-    repo: "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse"
-    filename: "mongodb-org-8.0"
+- name: Add MongoDB APT repository (Ubuntu 24.04 Noble)
+  ansible.builtin.apt_repository:
+    repo: "{{ mongodb_repo_line }}"
+    filename: "mongodb-org-{{ mongodb_repo_series }}"
     state: present
 
-# Force refresh and show detailed gpg verification if it still fails
-- name: Update apt cache (with no cache validity)
-  apt:
+- name: Update APT cache (force refresh)
+  ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 0
+

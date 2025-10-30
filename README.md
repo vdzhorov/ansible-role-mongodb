@@ -1,9 +1,8 @@
 # Ansible Role MongoDB
 
-Install and configure **MongoDB 8.0.15 (LTS)** on **Ubuntu 24.04 (Noble)** with authentication, user management, replica sets, and production-grade OS tuning.
+Install and configure **MongoDB 8.0.15 (LTS)** on **Ubuntu 24.04 (Noble)** with authentication, user management and production-grade OS tuning.
 
 > ✅ Version is **pinned** to `8.0.15` by default (overridable).  
-> ✅ Supports single-node or multi-node replica sets.  
 > ✅ Idempotent user management via `mongosh`.
 
 ---
@@ -14,7 +13,6 @@ Install and configure **MongoDB 8.0.15 (LTS)** on **Ubuntu 24.04 (Noble)** with 
 - [Compatibility](#compatibility)
 - [Role Variables](#role-variables)
 - [Quick Start](#quick-start)
-- [Replica Set (3 nodes)](#replica-set-3-nodes)
 - [Security & Credentials](#security--credentials)
 - [TLS / Encryption](#tls--encryption)
 - [Version Pinning & Upgrades](#version-pinning--upgrades)
@@ -29,7 +27,6 @@ Install and configure **MongoDB 8.0.15 (LTS)** on **Ubuntu 24.04 (Noble)** with 
 
 - Installs **MongoDB 8.0.15** from the official MongoDB APT repository.
 - Enables **SCRAM** authentication and **keyfile** for internal member auth.
-- Bootstraps **replica sets** and adds members idempotently.
 - Creates/updates **admin** and **application users**.
 - **OS tuning** for production (nofile/nproc limits, THP disabled, low swappiness).
 - Clean separation of **defaults**, **vars**, **tasks**, **handlers**, **templates**, and **meta** (with `argument_specs.yml`).
@@ -61,13 +58,6 @@ mongodb_logpath: "/var/log/mongodb/mongod.log"
 mongodb_enable_auth: true
 mongodb_keyfile_path: "/etc/mongod-keyfile"
 mongodb_keyfile_content: "{{ lookup('password', inventory_dir ~ '/.mongodb_keyfile chars=ascii_letters,digits length=48') }}"
-
-# Replica set
-mongodb_replset_enabled: true
-mongodb_replset_name: "rs0"
-mongodb_replset_members:
-  - "{{ ansible_fqdn | default(inventory_hostname) }}:{{ mongodb_port }}"
-mongodb_node_role: primary            # primary|secondary|arbiter
 
 # Admin + app users
 mongodb_admin_user: "admin"
@@ -116,55 +106,6 @@ Playbook:
 ```yaml
 - name: Provision single-node MongoDB
   hosts: mongo_single
-  become: true
-  roles:
-    - mongodb_ubuntu24
-```
-
-## Replica Set (3 nodes)
-
-Inventory:
-
-```ini
-[mongo_rs]
-mongo1 ansible_host=10.0.0.31 mongodb_node_role=primary
-mongo2 ansible_host=10.0.0.32 mongodb_node_role=secondary
-mongo3 ansible_host=10.0.0.33 mongodb_node_role=secondary
-```
-
-Group vars `group_vars/mongo_rs.yml`:
-
-```yaml
-mongodb_replset_enabled: true
-mongodb_replset_name: rs0
-mongodb_replset_members:
-  - mongo1:27017
-  - mongo2:27017
-  - mongo3:27017
-
-# Keep this identical across all members
-mongodb_keyfile_content: "{{ vault_mongodb_keyfile }}"
-
-# Auth
-mongodb_admin_pwd: "{{ vault_mongodb_admin_pwd }}"
-mongodb_users:
-  - name: app_rw
-    pwd: "{{ vault_app_rw_pwd }}"
-    db: appdb
-    roles:
-      - { role: readWrite, db: appdb }
-  - name: app_ro
-    pwd: "{{ vault_app_ro_pwd }}"
-    db: appdb
-    roles:
-      - { role: read, db: appdb }
-```
-
-Playbook:
-
-```yaml
-- name: Provision MongoDB Replica Set
-  hosts: mongo_rs
   become: true
   roles:
     - mongodb_ubuntu24
@@ -274,11 +215,6 @@ mongod won’t start after config change
 
 - Check `/var/log/mongodb/mongod.log`.
 - Validate `/etc/mongod.conf` syntax (YAML). The role’s template avoids duplicate keys.
-
-Replica set not initiating
-
-- Ensure the inventory/vars list correct FQDN/IP + port for all members.
-- Confirm members can reach each other on TCP 27017 and that bindIp allows peer connections.
 
 Users not created/updated
 
